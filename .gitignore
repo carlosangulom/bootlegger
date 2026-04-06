@@ -1,0 +1,18 @@
+# Project notes (not for version control)
+CLAUDE.md
+plan.md
+ideas.md
+
+# Claude Code local settings
+.claude/
+
+# Build output
+/bootlegger
+
+# Session data
+BOOTLEGGER/
+
+# Go
+*.test
+*.out
+vendor/
