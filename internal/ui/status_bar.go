@@ -57,6 +57,8 @@ func stateDisplayLabel(state SessionState) string {
 	switch state {
 	case StateInit:
 		return "INIT"
+	case StateSessionManager:
+		return "SESSIONS"
 	case StateBooting:
 		return "BOOTING"
 	case StateReady:

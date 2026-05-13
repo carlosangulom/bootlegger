@@ -1,69 +1,53 @@
 package ui
 
-import "time"
+import "bootlegger/internal/core"
 
-// SessionState represents the current state of a bootlegger session
-type SessionState string
+// Domain types — aliased from core so all ui/ files continue to compile unchanged
+type SessionState = core.SessionState
+type SourceType = core.SourceType
+type Track = core.Track
+type TrackStatus = core.TrackStatus
+type LogLevel = core.LogLevel
+type LogEntry = core.LogEntry
 
+// SessionState constants
 const (
-	StateInit            SessionState = "INIT"
-	StateBooting         SessionState = "BOOTING"
-	StateReady           SessionState = "READY"
-	StateFetching        SessionState = "FETCHING"
-	StatePreview         SessionState = "PREVIEW"
-	StateSetlistSplit    SessionState = "SETLIST_SPLIT"
-	StateSetlistInput    SessionState = "SETLIST_INPUT"
-	StateSettingsConfirm SessionState = "SETTINGS_CONFIRM"
-	StateDownloading     SessionState = "DOWNLOADING"
-	StateExtracting      SessionState = "EXTRACTING"
-	StateSplitting       SessionState = "SPLITTING"
-	StateCommitted       SessionState = "COMMITTED"
-	StateError           SessionState = "ERROR"
+	StateInit            = core.StateInit
+	StateSessionManager  = core.StateSessionManager
+	StateBooting         = core.StateBooting
+	StateReady           = core.StateReady
+	StateFetching        = core.StateFetching
+	StatePreview         = core.StatePreview
+	StateSetlistSplit    = core.StateSetlistSplit
+	StateSetlistInput    = core.StateSetlistInput
+	StateSettingsConfirm = core.StateSettingsConfirm
+	StateDownloading     = core.StateDownloading
+	StateExtracting      = core.StateExtracting
+	StateSplitting       = core.StateSplitting
+	StateCommitted       = core.StateCommitted
+	StateError           = core.StateError
 )
 
-// SourceType identifies the input source
-type SourceType string
-
+// SourceType constants
 const (
-	SourceNone    SourceType = "NONE"
-	SourceYouTube SourceType = "YOUTUBE"
-	SourceDropbox SourceType = "DROPBOX"
+	SourceNone    = core.SourceNone
+	SourceYouTube = core.SourceYouTube
+	SourceDropbox = core.SourceDropbox
 )
 
-// Track represents a single track to be split
-type Track struct {
-	Number    int
-	Title     string
-	StartTime time.Duration
-	EndTime   time.Duration
-	Status    TrackStatus
-	Selected  bool
-}
-
-// TrackStatus represents the processing state of a track
-type TrackStatus string
-
+// TrackStatus constants
 const (
-	TrackPending    TrackStatus = "PENDING"
-	TrackProcessing TrackStatus = "PROCESSING"
-	TrackComplete   TrackStatus = "COMPLETE"
-	TrackError      TrackStatus = "ERROR"
+	TrackPending    = core.TrackPending
+	TrackProcessing = core.TrackProcessing
+	TrackComplete   = core.TrackComplete
+	TrackError      = core.TrackError
 )
 
-// LogEntry represents a single log message
-type LogEntry struct {
-	Time    time.Time
-	Level   LogLevel
-	Message string
-}
-
-// LogLevel defines log severity
-type LogLevel string
-
+// LogLevel constants
 const (
-	LogInfo  LogLevel = "INFO"
-	LogWarn  LogLevel = "WARN"
-	LogError LogLevel = "ERROR"
+	LogInfo  = core.LogInfo
+	LogWarn  = core.LogWarn
+	LogError = core.LogError
 )
 
 // Progress holds progress information for various operations
@@ -73,7 +57,7 @@ type Progress struct {
 	Split      float64
 }
 
-// LogPanelTab represents the active tab in the log panel
+// LogPanelTab represents the active tab in the right panel
 type LogPanelTab int
 
 const (
@@ -81,7 +65,7 @@ const (
 	LogTabFiles
 )
 
-// PreviewPanelTab represents the active tab in the preview panel
+// PreviewPanelTab represents the active tab in the left panel
 type PreviewPanelTab int
 
 const (

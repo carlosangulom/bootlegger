@@ -3,13 +3,14 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"bootlegger/internal/core"
+	"bootlegger/internal/session"
 	"bootlegger/internal/source"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,10 @@ type Model struct {
 	logo       LogoPanel
 	statusBar  StatusBar
 
+	// Session manager (startup screen)
+	sessionManager SessionManagerModel
+	baseDir        string
+
 	// State
 	state     SessionState
 	showBoot  bool
@@ -36,8 +41,10 @@ type Model struct {
 	currentURL string
 
 	// Session
-	sessionID  string
-	sessionDir string
+	sessionID         string
+	sessionDir        string
+	sessionTitle      string // video title, for session.json
+	sessionTrackCount int    // track count, for session.json
 
 	// Download
 	downloader   *source.Downloader
@@ -62,33 +69,30 @@ type Model struct {
 	ledBlink bool
 }
 
-// New creates a new Model
+// New creates a new Model starting at the session manager screen.
 func New() Model {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	sessionID := time.Now().Format("20060102-150405")
-	homeDir, _ := os.UserHomeDir()
-	baseDir := filepath.Join(homeDir, "BOOTLEGGER")
-	sessionDir := filepath.Join(baseDir, "sessions", sessionID)
+	baseDir, _ := core.DefaultBaseDir()
 
 	m := Model{
-		boot:       NewBootModel(),
-		source:     NewSourcePanel(),
-		leftPanel:  NewLeftPanel(),
-		rightPanel: NewRightPanel(),
-		logo:       NewLogoPanel(),
-		statusBar:  NewStatusBar(),
-		state:      StateBooting,
-		showBoot:   true,
-		width:      80,
-		height:     24,
-		sessionID:  sessionID,
-		sessionDir: sessionDir,
-		ctx:        ctx,
-		cancel:     cancel,
+		boot:           NewBootModel(),
+		source:         NewSourcePanel(),
+		leftPanel:      NewLeftPanel(),
+		rightPanel:     NewRightPanel(),
+		logo:           NewLogoPanel(),
+		statusBar:      NewStatusBar(),
+		sessionManager: NewSessionManagerModel(baseDir),
+		baseDir:        baseDir,
+		state:          StateSessionManager,
+		showBoot:       false,
+		width:          80,
+		height:         24,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
-	m.statusBar.SetSessionID(sessionID)
+	m.statusBar.SetState(StateSessionManager)
 
 	return m
 }
@@ -96,8 +100,8 @@ func New() Model {
 // Init implements tea.Model
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.boot.Init(),
-		tea.EnableMouseCellMotion, // Enable mouse support
+		scanSessionsCmd(m.baseDir),
+		tea.EnableMouseCellMotion,
 	)
 }
 
@@ -107,6 +111,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Delegate all key handling to the session manager when on the startup screen.
+		if m.state == StateSessionManager {
+			var cmd tea.Cmd
+			m.sessionManager, cmd = m.sessionManager.Update(msg)
+			return m, cmd
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			m.cancel()
@@ -245,6 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.state == StateSetlistInput && m.leftPanel.SetlistTab().selectionMode {
 				// User confirmed track selection - go directly to settings
 				selectedTracks := m.leftPanel.SetlistTab().GetSelectedTracks()
+				m.sessionTrackCount = len(selectedTracks)
 				format := m.leftPanel.InfoTab().GetSelectedFormat()
 				formatDesc := "UNKNOWN"
 				if format != nil {
@@ -446,6 +458,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.updateLayout()
 
+	case SessionsLoadedMsg:
+		m.sessionManager.SetRecords(msg.Records)
+
+	case NewSessionMsg:
+		// Create a fresh session and transition to the boot animation.
+		sess := core.NewSession(m.baseDir)
+		m.sessionID = sess.ID
+		m.sessionDir = sess.Dir
+		m.sessionTitle = ""
+		m.sessionTrackCount = 0
+		m.state = StateBooting
+		m.showBoot = true
+		m.statusBar.SetSessionID(m.sessionID)
+		m.statusBar.SetState(StateBooting)
+		cmds = append(cmds, m.boot.Init())
+
 	case BootStepMsg:
 		var cmd tea.Cmd
 		m.boot, cmd = m.boot.Update(msg)
@@ -494,12 +522,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.source.SetInputMode(true)
 			m.source.Clear()
 			m.urlInput = ""
+			cmds = append(cmds, writeSessionRecordCmd(m.sessionDir, m.sessionID, m.currentURL, m.sessionTitle, "ERROR", 0, nil))
 		} else {
 			meta := msg.Metadata.(*source.VideoMetadata)
 			m.leftPanel.InfoTab().SetMetadata(meta)
 			m.state = StatePreview
 			m.statusBar.SetState(StatePreview)
 			m.rightPanel.LogTab().AddInfo("METADATA LOADED: " + meta.Title)
+			m.sessionTitle = meta.Title
+			cmds = append(cmds, writeSessionRecordCmd(m.sessionDir, m.sessionID, m.currentURL, m.sessionTitle, "PREVIEW", 0, nil))
 		}
 
 	case DownloadProgressMsg:
@@ -527,6 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.source.SetInputMode(true)
 			m.source.Clear()
 			m.urlInput = ""
+			cmds = append(cmds, writeSessionRecordCmd(m.sessionDir, m.sessionID, m.currentURL, m.sessionTitle, "ERROR", m.sessionTrackCount, nil))
 		} else {
 			m.downloadFile = msg.FilePath
 			m.rightPanel.LogTab().AddInfo("SOURCE INGESTED: " + msg.Title)
@@ -566,6 +598,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.source.SetInputMode(true)
 			m.source.Clear()
 			m.urlInput = ""
+			cmds = append(cmds, writeSessionRecordCmd(m.sessionDir, m.sessionID, m.currentURL, m.sessionTitle, "ERROR", m.sessionTrackCount, nil))
 		} else {
 			m.extractedFile = msg.OutputPath
 			m.extractedDuration = msg.Duration
@@ -615,6 +648,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusBar.SetCommitReady(true)
 		m.rightPanel.LogTab().AddInfo("ALL TRACKS SPLIT")
 		m.rightPanel.LogTab().AddInfo("SESSION COMMITTED")
+		now := time.Now()
+		cmds = append(cmds, writeSessionRecordCmd(m.sessionDir, m.sessionID, m.currentURL, m.sessionTitle, "COMMITTED", m.sessionTrackCount, &now))
 
 	case LogMsg:
 		m.rightPanel.LogTab().AddEntry(LogEntry{Level: msg.Level, Message: msg.Message})
@@ -686,6 +721,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.quitting {
 		return "BOOTLEGGER SHUTDOWN\n"
+	}
+
+	if m.state == StateSessionManager {
+		return m.sessionManager.View(m.width, m.height)
 	}
 
 	if m.showBoot {
@@ -973,6 +1012,27 @@ func formatProgressBar(label string, percent float64) string {
 
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 	return fmt.Sprintf("%s [%s] %3d%%", label, bar, int(percent*100))
+}
+
+// writeSessionRecordCmd returns a fire-and-forget Cmd that persists session metadata to disk.
+func writeSessionRecordCmd(dir, id, url, title, state string, trackCount int, completedAt *time.Time) tea.Cmd {
+	return func() tea.Msg {
+		createdAt, err := time.ParseInLocation("20060102-150405", id, time.Local)
+		if err != nil {
+			createdAt = time.Now()
+		}
+		r := session.SessionRecord{
+			ID:          id,
+			URL:         url,
+			Title:       title,
+			State:       state,
+			TrackCount:  trackCount,
+			CreatedAt:   createdAt,
+			CompletedAt: completedAt,
+		}
+		_ = r.Save(dir)
+		return nil
+	}
 }
 
 // ledBlinkTick creates a command that sends periodic LED blink messages

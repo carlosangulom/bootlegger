@@ -1,0 +1,188 @@
+package templates
+
+import (
+	"fmt"
+	"bootlegger/internal/core"
+)
+
+templ ProgressBarContent(label string, pct float64) {
+	<div class="mb-3">
+		<div class="flex justify-between text-[10px] text-muted tracking-widest mb-1">
+			<span>{ label }</span>
+			<span>{ fmt.Sprintf("%.0f%%", pct*100) }</span>
+		</div>
+		<div class="h-px bg-wire">
+			<div class="h-px bg-accent transition-all duration-300" style={ fmt.Sprintf("width:%.1f%%", pct*100) }></div>
+		</div>
+	</div>
+}
+
+templ TrackListContent(tracks []core.Track) {
+	for _, t := range tracks {
+		<div class={ "flex gap-3 text-xs py-0.5 " + trackColor(t.Status) }>
+			<span class="text-muted">{ fmt.Sprintf("%02d", t.Number) }</span>
+			<span>{ trackStatusIcon(t.Status) }</span>
+			<span>{ t.Title }</span>
+		</div>
+	}
+}
+
+// TrackPlayerContent replaces TrackListContent once the pipeline completes.
+// Track rows are clickable selectors; a single shared WaveSurfer player lives
+// at the bottom of the panel. No inline <script> — the btlggrPlayer Alpine
+// component is defined in layout.templ and initialised via MutationObserver.
+templ TrackPlayerContent(sessionID string, tracks []core.Track, playerTracks []PlayerTrack) {
+	<div x-data="btlggrPlayer" data-tracks={ playerTracksJSON(sessionID, playerTracks) }>
+		for _, t := range tracks {
+			<div
+				class="flex items-center gap-2 text-xs py-1.5 border-b border-wire last:border-b-0 select-none transition-colors"
+				:class={ fmt.Sprintf(`%d === idx ? "text-accent cursor-pointer hover:bg-bg" : "%s"`,
+					playerTrackIdx(playerTracks, t.Number),
+					trackRowClass(playerTracks, t.Number, t.Status),
+				)}
+				@click={ fmt.Sprintf("select(%d)", playerTrackIdx(playerTracks, t.Number)) }
+			>
+				<span class="text-muted w-5 shrink-0 font-mono tabular-nums">{ fmt.Sprintf("%02d", t.Number) }</span>
+				if playerTrackIdx(playerTracks, t.Number) >= 0 {
+					<span
+						class="w-4 shrink-0"
+						:class={ fmt.Sprintf(`%d === idx ? "text-accent" : "text-success"`, playerTrackIdx(playerTracks, t.Number)) }
+					>►</span>
+				} else {
+					<span class={ "w-4 shrink-0 " + trackColor(t.Status) }>{ trackStatusIcon(t.Status) }</span>
+				}
+				<span class="flex-1 truncate">{ t.Title }</span>
+			</div>
+		}
+		if len(playerTracks) > 0 {
+			<div class="mt-3 pt-3 border-t border-wire">
+				<div x-ref="wave" class="bg-bg mb-2" style="min-height:64px"></div>
+				<div class="flex items-center justify-between text-[10px] text-muted font-mono mb-3">
+					<span
+						class="truncate flex-1"
+						x-text="current ? String(current.num).padStart(2,'0') + ' — ' + current.title : 'SELECT A TRACK TO PLAY'"
+					></span>
+					<span
+						class="tabular-nums shrink-0 ml-3"
+						x-text="ws ? fmt(currentTime) + ' / ' + fmt(duration) : ''"
+					></span>
+				</div>
+				<div class="flex items-center justify-center gap-8 pb-1">
+					<button
+						@click="prev()"
+						:disabled="idx <= 0"
+						class="text-muted hover:text-accent disabled:opacity-30 transition-colors text-sm"
+						title="Previous"
+					>⏮</button>
+					<button
+						@click="toggle()"
+						class="text-accent w-8 h-8 flex items-center justify-center border border-accent hover:bg-accent hover:text-black transition-colors"
+						x-text="playing ? '⏸' : '►'"
+					></button>
+					<button
+						@click="next()"
+						:disabled="idx >= tracks.length - 1"
+						class="text-muted hover:text-accent disabled:opacity-30 transition-colors text-sm"
+						title="Next"
+					>⏭</button>
+				</div>
+			</div>
+		}
+	</div>
+}
+
+templ LogEntryContent(stage, msg string, isErr bool) {
+	<div class={ "text-xs " + logColor(isErr) }>
+		if stage != "" {
+			<span class="text-wire">{ "[" + stage + "]" }</span>
+			{ " " }
+		}
+		{ msg }
+	</div>
+}
+
+templ DoneContent(isErr bool, msg string) {
+	if isErr {
+		<span class="text-danger tracking-widest">{ "ERROR: " + msg }</span>
+	} else {
+		<span class="text-success tracking-widest">{ msg }</span>
+	}
+}
+
+// PlayerSection renders a waveform player for each completed split track.
+// Waveform instances are created lazily on first play click via WaveSurfer.js.
+templ PlayerSection(sessionID string, tracks []PlayerTrack) {
+	if len(tracks) > 0 {
+		<div class="bg-panel border border-wire mt-4">
+			<div class="text-muted text-[10px] tracking-widest px-4 py-2 border-b border-wire">PLAYBACK</div>
+			for i, t := range tracks {
+				<div
+					class="border-b border-wire last:border-b-0"
+					data-player-idx={ fmt.Sprintf("%d", i) }
+					data-player-num={ fmt.Sprintf("%d", t.Number) }
+					data-player-url={ playerFileURL(sessionID, t.Filename) }
+				>
+					<div class="flex items-center gap-3 px-4 py-2">
+						<button
+							data-play
+							class="text-accent text-sm w-5 shrink-0 hover:text-white transition-colors select-none cursor-pointer"
+						>►</button>
+						<span class="text-muted text-xs w-6 shrink-0 tabular-nums font-mono">{ fmt.Sprintf("%02d", t.Number) }</span>
+						<span class="text-xs flex-1 truncate">{ t.Title }</span>
+						<span data-time class="text-muted text-[10px] font-mono tabular-nums w-20 text-right">–:––</span>
+					</div>
+					<div data-wave class="px-4 pb-2" style="min-height:48px"></div>
+				</div>
+			}
+		</div>
+		<script>
+			(function() {
+				if (typeof WaveSurfer === 'undefined') { console.warn('WaveSurfer not loaded'); return; }
+				var instances = {};
+				document.querySelectorAll('[data-player-idx]').forEach(function(row) {
+					var idx = row.dataset.playerIdx;
+					var fileUrl = row.dataset.playerUrl;
+					var playBtn = row.querySelector('[data-play]');
+					var waveEl  = row.querySelector('[data-wave]');
+					var timeEl  = row.querySelector('[data-time]');
+
+					playBtn.addEventListener('click', function() {
+						if (!instances[idx]) {
+							playBtn.textContent = '...';
+							var ws = WaveSurfer.create({
+								container:     waveEl,
+								waveColor:     '#2a2d31',
+								progressColor: '#ffb000',
+								cursorColor:   '#ffb000',
+								url:           fileUrl,
+								height:        48,
+								barWidth:      2,
+								barGap:        1,
+								normalize:     true,
+							});
+							instances[idx] = ws;
+							ws.on('ready',      function() { ws.play(); });
+							ws.on('play',       function() { playBtn.textContent = '⏸'; });
+							ws.on('pause',      function() { playBtn.textContent = '►'; });
+							ws.on('finish',     function() { playBtn.textContent = '►'; });
+							ws.on('timeupdate', function(t) {
+								var d = ws.getDuration() || 0;
+								timeEl.textContent = fmtSecs(t) + ' / ' + fmtSecs(d);
+							});
+						} else {
+							var ws = instances[idx];
+							if (ws.isPlaying()) { ws.pause(); } else { ws.play(); }
+						}
+					});
+				});
+
+				function fmtSecs(s) {
+					if (!s || isNaN(s)) return '0:00';
+					var m = Math.floor(s / 60);
+					var sec = Math.floor(s % 60);
+					return m + ':' + String(sec).padStart(2, '0');
+				}
+			})();
+		</script>
+	}
+}

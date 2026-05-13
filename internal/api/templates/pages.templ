@@ -1,0 +1,525 @@
+package templates
+
+import (
+	"fmt"
+	"bootlegger/internal/core"
+	"bootlegger/internal/session"
+	"bootlegger/internal/source"
+)
+
+templ SessionsPage(records []session.SessionRecord) {
+	@Layout("BTLGGR — SESSIONS") {
+		<script>
+			document.addEventListener('alpine:init', () => {
+				Alpine.data('sessionFilter', () => ({
+					filterText: '',
+					filterState: 'all',
+					filterDate: 'all',
+					matchRow(el) {
+						const title = (el.dataset.title || '').toLowerCase();
+						const state = el.dataset.state || '';
+						const created = el.dataset.created || '';
+						if (this.filterText && !title.includes(this.filterText.toLowerCase())) return false;
+						if (this.filterState !== 'all') {
+							if (this.filterState === 'complete' && state !== 'COMMITTED') return false;
+							if (this.filterState === 'error' && state !== 'ERROR') return false;
+							if (this.filterState === 'partial' && (state === 'COMMITTED' || state === 'ERROR')) return false;
+						}
+						if (this.filterDate !== 'all') {
+							const days = this.filterDate === '7d' ? 7 : 30;
+							if (new Date(created) < new Date(Date.now() - days * 86400000)) return false;
+						}
+						return true;
+					}
+				}));
+			});
+		</script>
+		<div x-data="sessionFilter()">
+			<div class="flex justify-between items-end mb-6">
+				<div>
+					<div class="text-accent text-xs tracking-widest mb-1">BTLGGR</div>
+					<div class="text-muted text-[10px] tracking-widest">SESSION MANAGER</div>
+				</div>
+				<a href="/" class="bg-accent text-black font-bold px-4 py-2 text-xs tracking-widest">+ NEW SESSION</a>
+			</div>
+			<div class="flex gap-4 mb-4 items-end">
+				<div class="flex-1">
+					<label class="text-muted text-[10px] tracking-widest uppercase block mb-1">FILTER</label>
+					<input
+						x-model="filterText"
+						type="text"
+						placeholder="search by title..."
+						class="w-full bg-bg border border-wire text-sm p-2 font-mono outline-none"
+					/>
+				</div>
+				<div>
+					<label class="text-muted text-[10px] tracking-widest uppercase block mb-1">STATE</label>
+					<select x-model="filterState" class="bg-bg border border-wire text-sm p-2 font-mono outline-none">
+						<option value="all">ALL</option>
+						<option value="complete">COMPLETE</option>
+						<option value="error">ERROR</option>
+						<option value="partial">PARTIAL</option>
+					</select>
+				</div>
+				<div>
+					<label class="text-muted text-[10px] tracking-widest uppercase block mb-1">DATE</label>
+					<select x-model="filterDate" class="bg-bg border border-wire text-sm p-2 font-mono outline-none">
+						<option value="all">ALL TIME</option>
+						<option value="7d">LAST 7 DAYS</option>
+						<option value="30d">LAST 30 DAYS</option>
+					</select>
+				</div>
+			</div>
+			<div class="bg-panel border border-wire">
+				<div class="flex gap-4 px-4 py-2 border-b border-wire text-muted text-[10px] tracking-widest">
+					<span class="w-24">DATE</span>
+					<span class="flex-1">TITLE</span>
+					<span class="w-24">STATE</span>
+					<span class="w-14 text-right">TRACKS</span>
+					<span class="w-28"></span>
+				</div>
+				if len(records) == 0 {
+					<div class="px-4 py-8 text-muted text-xs tracking-widest text-center">
+						NO SESSIONS YET. <a href="/" class="text-accent underline">START ONE.</a>
+					</div>
+				}
+				for _, r := range records {
+					@sessionRow(r)
+				}
+			</div>
+		</div>
+	}
+}
+
+templ sessionRow(r session.SessionRecord) {
+	<div
+		x-show="matchRow($el)"
+		data-title={ r.Title }
+		data-state={ r.State }
+		data-created={ r.CreatedAt.Format("2006-01-02") }
+		class="flex gap-4 px-4 py-3 border-b border-wire items-center"
+		data-session-row={ r.ID }
+	>
+		<span class="w-24 text-muted text-xs">{ r.CreatedAt.Format("2006-01-02") }</span>
+		<span class="flex-1 text-sm truncate">
+			if r.Title != "" {
+				{ r.Title }
+			} else {
+				{ r.ID }
+			}
+		</span>
+		<span class={ "w-24 text-xs tracking-widest " + sessionStateClass(r.State) }>{ sessionStateLabel(r.State) }</span>
+		<span class="w-14 text-right text-muted text-xs">
+			if r.TrackCount > 0 {
+				{ fmt.Sprintf("%d tk", r.TrackCount) }
+			} else {
+				{ "—" }
+			}
+		</span>
+		<span class="w-28 flex justify-end gap-2">
+			<a
+				href={ templ.SafeURL("/sessions/" + r.ID + "/load") }
+				class="text-[10px] text-muted tracking-widest border border-wire px-2 py-1 hover:text-accent hover:border-accent transition-colors"
+			>LOAD</a>
+			<button
+				hx-delete={ "/sessions/" + r.ID }
+				hx-target={ "[data-session-row='" + r.ID + "']" }
+				hx-swap="delete"
+				hx-confirm="Delete this session from disk?"
+				class="text-[10px] text-muted tracking-widest border border-wire px-2 py-1 hover:text-danger hover:border-danger transition-colors"
+			>DEL</button>
+		</span>
+	</div>
+}
+
+templ IndexPage() {
+	@Layout("BTLGGR") {
+		<div class="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center">
+			<div class="mb-10">
+				@btlggrLogo()
+			</div>
+			<div id="content" class="w-full max-w-lg">
+				@SourceForm()
+			</div>
+			<div class="flex gap-3 mt-4 w-full max-w-lg">
+				<a href="/sessions" class="flex-1 text-center text-xs text-muted tracking-widest border border-wire px-4 py-2 hover:text-gray-200 hover:border-muted transition-colors">MANAGE SESSIONS</a>
+				<a href="/settings" class="flex-1 text-center text-xs text-muted tracking-widest border border-wire px-4 py-2 hover:text-gray-200 hover:border-muted transition-colors">SETTINGS</a>
+			</div>
+		</div>
+		@logoAnimScript()
+	}
+}
+
+templ SourceForm() {
+	<div class="bg-panel border border-wire p-4">
+		<form hx-post="/fetch" hx-target="#content" hx-swap="innerHTML" hx-indicator="#fetch-spinner">
+			<div class="mb-3">
+				<label class="text-muted text-[10px] tracking-widest uppercase block mb-1">SOURCE URL</label>
+				<input
+					type="text"
+					name="url"
+					class="w-full bg-bg border border-wire p-2 font-mono outline-none"
+					style="font-size:16px;"
+					placeholder="https://..."
+				/>
+			</div>
+			<div class="flex justify-end">
+				<button type="submit" class="bg-accent text-black font-bold px-4 py-2 text-xs tracking-widest flex items-center gap-2">
+					<svg
+						id="fetch-spinner"
+						class="htmx-indicator animate-spin h-3 w-3 shrink-0"
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+					>
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+					</svg>
+					FETCH
+				</button>
+			</div>
+		</form>
+	</div>
+}
+
+templ MetadataSection(sessionID string, meta *source.VideoMetadata) {
+	<script>
+		// Alpine.data() must be called directly (not inside alpine:init) when this
+		// template is injected via HTMX — by that point alpine:init has already fired.
+		// The window.Alpine guard handles the HTMX case; the alpine:init listener
+		// handles the rare case where this is rendered on first page load.
+		;(function() {
+			function defineSessionForm() {
+				Alpine.data('sessionForm', () => ({
+					init() {
+						const el = document.getElementById('session-init')
+						if (!el) return
+						let d; try { d = JSON.parse(el.dataset.init) } catch(e) { return }
+						if (d.setlistText) this.text = d.setlistText
+						if (d.selectedFormatId) {
+							const sel = this.$el.querySelector('select[name=format_id]')
+							if (sel) sel.value = d.selectedFormatId
+						}
+						if (d.accepted && d.tracks && d.tracks.length) {
+							this.tracks = d.tracks.map(t => ({
+								number: t.number, title: t.title, start: t.startSec, selected: t.selected,
+							}))
+							this.accepted = true
+						}
+					},
+					text: '',
+					accepted: false,
+					tracks: [],
+					badLines: [],
+
+					get isEmpty()       { return this.text.trim() === '' },
+					get canStart()      { return this.isEmpty || this.accepted },
+					get selectedCount() { return this.tracks.filter(t => t.selected).length },
+					get selectedList()  { return this.tracks.filter(t => t.selected).map(t => t.number).join(',') },
+
+					fmtSecs(s) {
+						const h = Math.floor(s / 3600)
+						const m = Math.floor((s % 3600) / 60)
+						const sc = s % 60
+						const mm = String(m).padStart(2, '0')
+						const ss = String(sc).padStart(2, '0')
+						return h > 0 ? h + ':' + mm + ':' + ss : m + ':' + ss
+					},
+
+					parseLine(line) {
+						// Pattern A: timestamp first — "0:00 Title", "[1:23:45] - Title"
+						const reA = /^[\[(•]?\s*(\d+):(\d{2})(?::(\d{2}))?[\])]?\s*[-–—|]?\s*(.+?)\s*$/
+						// Pattern B: title first, timestamp at end — "1 - Title 0:19", "Title 3:45"
+						const reB = /^(?:\d+\s*[.\-–—]\s*)?(.+?)\s+(\d+):(\d{2})(?::(\d{2}))?\s*$/
+						let m = reA.exec(line)
+						if (m) {
+							const a = +m[1], b = +m[2], c = m[3] ? +m[3] : null
+							return { title: m[4].trim(), start: c !== null ? a*3600+b*60+c : a*60+b }
+						}
+						m = reB.exec(line)
+						if (m) {
+							const a = +m[2], b = +m[3], c = m[4] ? +m[4] : null
+							return { title: m[1].trim(), start: c !== null ? a*3600+b*60+c : a*60+b }
+						}
+						return null
+					},
+
+					accept() {
+						const lines = this.text.split('\n').filter(l => l.trim() !== '')
+						const parsed = [], bad = []
+						for (const line of lines) {
+							const r = this.parseLine(line)
+							if (r) parsed.push({ number: parsed.length + 1, ...r, selected: true })
+							else    bad.push(line)
+						}
+						if (bad.length) { this.badLines = bad; return }
+						this.tracks   = parsed
+						this.badLines = []
+						this.accepted = true
+					},
+
+					edit() { this.accepted = false; this.tracks = []; this.badLines = [] },
+
+					toggleTrack(i) { this.tracks[i].selected = !this.tracks[i].selected },
+
+					toggleAll() {
+						const all = this.tracks.every(t => t.selected)
+						this.tracks.forEach(t => { t.selected = !all })
+					},
+				}))
+			}
+			if (window.Alpine) defineSessionForm()
+			else document.addEventListener('alpine:init', defineSessionForm)
+		})()
+	</script>
+	<div class="bg-panel border border-wire p-4 mt-4">
+		<div class="flex gap-4 mb-4">
+			<img src={ meta.Thumbnail } class="w-40 h-24 object-cover border border-wire"/>
+			<div>
+				<div class="text-sm mb-1">{ meta.Title }</div>
+				<div class="text-muted text-xs">{ meta.Uploader } · { formatDuration(meta.Duration) }</div>
+			</div>
+		</div>
+		<form
+			x-data="sessionForm"
+			hx-post={ "/start/" + sessionID }
+			hx-target="#content"
+			hx-swap="innerHTML"
+			@submit="if (!canStart) $event.preventDefault()"
+		>
+			<div class="mb-3">
+				<label class="text-muted text-[10px] tracking-widest uppercase block mb-1">FORMAT</label>
+				<select name="format_id" class="bg-bg border border-wire text-sm p-2 font-mono w-full outline-none">
+					for _, f := range meta.Formats {
+						<option value={ f.FormatID }>{ f.FormatID + " — " + f.FormatDescription() }</option>
+					}
+				</select>
+			</div>
+			<div class="mb-3">
+				<div class="flex justify-between items-center mb-1">
+					<label class="text-muted text-[10px] tracking-widest uppercase">SETLIST (OPTIONAL)</label>
+					<div class="flex gap-2 h-6">
+						<button
+							type="button"
+							x-show="!isEmpty && !accepted"
+							@click="accept()"
+							class="text-[10px] text-accent tracking-widest border border-accent px-3 hover:bg-accent hover:text-black transition-colors"
+						>ACCEPT</button>
+						<button
+							type="button"
+							x-show="accepted"
+							@click="edit()"
+							class="text-[10px] text-muted tracking-widest border border-wire px-3 hover:text-gray-200 hover:border-muted transition-colors"
+						>EDIT</button>
+					</div>
+				</div>
+				<textarea
+					name="setlist"
+					x-model="text"
+					x-show="!accepted"
+					:class="badLines.length ? 'border-danger' : 'border-wire'"
+					class="w-full h-40 bg-bg border text-xs p-2 font-mono outline-none resize-none"
+					placeholder={ fmt.Sprintf("0:00 Track One\n1 - Track Two 3:30\nTrack Three 7:45\n(max %s)", formatDuration(meta.Duration)) }
+				></textarea>
+				<div x-show="badLines.length && !accepted" class="mt-1 space-y-0.5">
+					<div class="text-danger text-[10px] tracking-widest">CANNOT PARSE:</div>
+					<template x-for="l in badLines" :key="l">
+						<div class="text-danger text-xs font-mono pl-2 truncate" x-text="l"></div>
+					</template>
+				</div>
+				<div x-show="accepted" class="border border-wire">
+					<div class="flex justify-between items-center px-3 py-1.5 border-b border-wire">
+						<span class="text-[10px] text-muted tracking-widest" x-text="selectedCount + ' / ' + tracks.length + ' TRACKS SELECTED'"></span>
+						<button
+							type="button"
+							@click="toggleAll()"
+							class="text-[10px] text-muted tracking-widest hover:text-accent transition-colors"
+							x-text="tracks.every(t => t.selected) ? 'DESELECT ALL' : 'SELECT ALL'"
+						></button>
+					</div>
+					<div class="max-h-56 overflow-y-auto">
+						<template x-for="(track, i) in tracks" :key="track.number">
+							<div
+								@click="toggleTrack(i)"
+								class="flex items-center gap-3 px-3 py-1.5 border-b border-wire last:border-b-0 cursor-pointer select-none hover:bg-bg transition-colors"
+								:class="track.selected ? '' : 'opacity-40'"
+							>
+								<span
+									class="text-[10px] w-5 shrink-0 font-bold"
+									:class="track.selected ? 'text-accent' : 'text-muted'"
+									x-text="track.selected ? '[■]' : '[□]'"
+								></span>
+								<span class="text-muted text-xs w-6 shrink-0 tabular-nums" x-text="String(track.number).padStart(2,'0')"></span>
+								<span class="text-muted text-xs w-14 shrink-0 font-mono tabular-nums" x-text="fmtSecs(track.start)"></span>
+								<span class="text-xs truncate" x-text="track.title"></span>
+							</div>
+						</template>
+					</div>
+				</div>
+				<input type="hidden" name="selected_tracks" :value="selectedList"/>
+			</div>
+			<div class="flex gap-3 mt-4">
+				<button
+					type="submit"
+					:disabled="!canStart"
+					:class="{ 'opacity-40 cursor-not-allowed': !canStart }"
+					class="bg-accent text-black font-bold px-4 py-2 text-xs tracking-widest transition-colors"
+				>START</button>
+				<a href="/" class="inline-block text-xs text-muted tracking-widest border border-wire px-3 py-1 self-center">RESET</a>
+			</div>
+		</form>
+	</div>
+}
+
+templ ProgressSection(sessionID string, tracks []core.Track) {
+	<div hx-ext="sse" sse-connect={ "/events/" + sessionID } sse-close="done">
+		<div class="flex items-center gap-3 mb-4">
+			<div id="status-badge" sse-swap="status" class="text-accent text-xs tracking-widest">STARTING</div>
+		</div>
+		<div id="done-status" sse-swap="done" class="mb-4"></div>
+		<div class="bg-panel border border-wire p-4 mb-4">
+			<div sse-swap="progress-download">@ProgressBarContent("DOWNLOAD", 0)</div>
+			<div sse-swap="progress-extract">@ProgressBarContent("EXTRACT", 0)</div>
+			<div sse-swap="progress-split">@ProgressBarContent("SPLIT", 0)</div>
+		</div>
+		if len(tracks) > 0 {
+			<div class="bg-panel border border-wire p-4 mb-4">
+				<div class="text-muted text-[10px] tracking-widest uppercase mb-2">TRACKS</div>
+				<div sse-swap="tracks">@TrackListContent(tracks)</div>
+			</div>
+		}
+		<div id="log"
+			sse-swap="log"
+			hx-swap="beforeend"
+			x-data
+			x-init="$watch('$el.innerHTML', () => $el.scrollTop = $el.scrollHeight)"
+			class="h-48 overflow-y-auto bg-bg border border-wire p-2 text-xs space-y-0.5 mb-4">
+		</div>
+		<div class="flex gap-3 mt-4">
+			<button
+				hx-post={ "/api/sessions/" + sessionID + "/cancel" }
+				hx-swap="none"
+				class="text-xs text-muted tracking-widest border border-wire px-3 py-1">CANCEL</button>
+			<a href="/" class="inline-block text-xs text-muted tracking-widest border border-wire px-3 py-1">RESET</a>
+		</div>
+	</div>
+}
+
+// logoAnimScript is the waveform animation shared by IndexPage and LoadedIndexPage.
+// Extracted here to avoid duplication (templ doesn't support shared script blocks natively).
+templ logoAnimScript() {
+	<script>
+		(function() {
+			const frames = [
+				['   ░░▒▒▓▓▓▓▓▒▒░░░░░░', '   ░░░▒▒▓▓▓▓▓▓▒▒░░░░', '   ░░░░▒▓▓▓▓▓▓▒▒░░░░', '   ░░▒▒▓▓▓▓▓▒░░░░░░░'],
+				['   ░▒▒▓▓▓▓▓▓▓▒▒░░░░░', '   ░░▒▒▓▓▓▓▓▓▓▓▒▒░░░', '   ░░░░▒▓▓▓▓▓▓▒░░░░░', '   ░░▒▒▓▓▓▓▓▒▒░░░░░░'],
+				['   ░░▒▒▓▓▓▓▓▓▓▓▒▒░░░', '   ░▒▒▓▓▓▓▓▓▓▓▓▒▒░░░', '   ░░░░▒▓▓▓▓▓▓▓▒▒░░░', '   ░░▒▒▓▓▓▓▓▓▒▒░░░░░'],
+				['   ░░░▒▒▓▓▓▓▓▓▓▒▒░░░', '   ░░▒▒▓▓▓▓▓▓▓▒▒░░░░', '   ░░░░▒▓▓▓▓▓▓▒▒░░░░', '   ░░▒▒▓▓▓▓▓▒▒░░░░░░'],
+				['   ░░▒▒▓▓▓▓▓▓▓▓▒▒░░░', '   ░░░▒▒▓▓▓▓▓▒▒░░░░░', '   ░░░▒▒▓▓▓▓▓▓▒▒░░░░', '   ░░▒▒▓▓▓▓▓▒▒░░░░░░'],
+				['   ░░▒▓▓▓▓▓▓▓▓▓▒▒░░░', '   ░░▒▒▓▓▓▓▓▓▒▒░░░░░', '   ░░░▒▒▓▓▓▓▓▓▓▒▒░░░', '   ░▒▒▓▓▓▓▓▒▒░░░░░░░'],
+				['   ░░▒▒▓▓▓▓▓▓▒▒░░░░░', '   ░▒▒▓▓▓▓▓▓▓▓▒▒░░░░', '   ░░░▒▒▓▓▓▓▓▓▓▒▒░░░', '   ░░▒▒▓▓▓▓▓▒▒░░░░░░'],
+				['   ░░░▒▒▓▓▓▓▓▓▓▒▒░░░', '   ░░▒▒▓▓▓▓▓▓▓▒▒░░░░', '   ░░░▒▒▓▓▓▓▓▓▒▒░░░░', '   ░░▒▒▓▓▓▓▓▒▒░░░░░░'],
+			];
+			const slots = [
+				{ el: document.getElementById('lw0'), fi: 1 },
+				{ el: document.getElementById('lw1'), fi: 2 },
+				{ el: document.getElementById('lw2'), fi: 0 },
+				{ el: document.getElementById('lw3'), fi: 3 },
+			];
+			let f = 0;
+			setInterval(function() {
+				f = (f + 1) % 8;
+				slots.forEach(s => { s.el.textContent = frames[f][s.fi]; });
+			}, 150);
+			slots.forEach(s => { s.el.textContent = frames[0][s.fi]; });
+		})();
+	</script>
+}
+
+// LoadedIndexPage renders the home page with a session pre-loaded into #content.
+// initJSON is a JSON blob read by the Alpine sessionForm init() hook.
+templ LoadedIndexPage(sessionID string, meta *source.VideoMetadata, initJSON string) {
+	@Layout("BTLGGR") {
+		<div class="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center">
+			<div class="mb-10">
+				@btlggrLogo()
+			</div>
+			<div id="content" class="w-full max-w-lg">
+				<div id="session-init" data-init={ initJSON } hidden></div>
+				@MetadataSection(sessionID, meta)
+			</div>
+			<div class="flex gap-3 mt-4 w-full max-w-lg">
+				<a href="/sessions" class="flex-1 text-center text-xs text-muted tracking-widest border border-wire px-4 py-2 hover:text-gray-200 hover:border-muted transition-colors">MANAGE SESSIONS</a>
+				<a href="/settings" class="flex-1 text-center text-xs text-muted tracking-widest border border-wire px-4 py-2 hover:text-gray-200 hover:border-muted transition-colors">SETTINGS</a>
+			</div>
+		</div>
+		@logoAnimScript()
+	}
+}
+
+// CommittedSessionPage is shown when a completed session is loaded from the
+// session manager. It renders the track player directly — no pipeline needed.
+templ CommittedSessionPage(rec *session.SessionRecord, tracks []core.Track, playerTracks []PlayerTrack) {
+	@Layout("BTLGGR — " + rec.Title) {
+		<div class="max-w-lg mx-auto py-8">
+			<div class="mb-5">
+				<a href="/sessions" class="text-[10px] text-muted tracking-widest hover:text-accent transition-colors">← SESSIONS</a>
+			</div>
+			<div class="bg-panel border border-wire p-4 mb-4">
+				<div class="flex gap-4">
+					if rec.Metadata != nil && rec.Metadata.Thumbnail != "" {
+						<img src={ rec.Metadata.Thumbnail } class="w-32 h-20 object-cover border border-wire shrink-0"/>
+					}
+					<div class="flex-1 min-w-0">
+						<div class="text-[10px] text-success tracking-widest mb-1">COMPLETE</div>
+						<div class="text-sm mb-1 truncate">{ rec.Title }</div>
+						if rec.Metadata != nil {
+							<div class="text-muted text-xs mb-1">{ rec.Metadata.Uploader } · { formatDuration(rec.Metadata.Duration) }</div>
+						}
+						<div class="text-[10px] text-muted">{ rec.CreatedAt.Format("2006-01-02 15:04") }</div>
+					</div>
+				</div>
+				if rec.URL != "" {
+					<a
+						href={ templ.SafeURL(rec.URL) }
+						target="_blank"
+						rel="noopener"
+						class="block mt-3 text-[10px] text-muted hover:text-accent transition-colors truncate"
+					>↗ { rec.URL }</a>
+				}
+			</div>
+			<div class="bg-panel border border-wire p-4 mb-4">
+				<div class="text-muted text-[10px] tracking-widest mb-3">
+					{ fmt.Sprintf("%d TRACKS", len(playerTracks)) }
+				</div>
+				@TrackPlayerContent(rec.ID, tracks, playerTracks)
+			</div>
+			<div class="flex gap-3">
+				<a href="/" class="text-xs text-muted tracking-widest border border-wire px-4 py-2 hover:text-gray-200 hover:border-muted transition-colors">NEW SESSION</a>
+			</div>
+		</div>
+	}
+}
+
+// LegacyLoadPage is shown when a session predates metadata persistence and
+// cannot be fully restored automatically.
+templ LegacyLoadPage(url string) {
+	@Layout("BTLGGR — LOAD") {
+		<div class="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center">
+			<div class="w-full max-w-lg bg-panel border border-wire p-4">
+				<div class="text-muted text-[10px] tracking-widest mb-3">CANNOT RESTORE SESSION</div>
+				<div class="text-sm text-gray-300 mb-4">
+					This session was created before metadata was persisted.
+					Re-fetch the source URL to start a new session with the same content.
+				</div>
+				if url != "" {
+					<div class="font-mono text-xs text-muted break-all mb-4 p-2 border border-wire bg-bg">{ url }</div>
+				}
+				<div class="flex gap-3">
+					<a href={ templ.SafeURL("/?url=" + url) } class="bg-accent text-black font-bold px-4 py-2 text-xs tracking-widest">GO TO INPUT</a>
+					<a href="/sessions" class="inline-block text-xs text-muted tracking-widest border border-wire px-3 py-2">BACK</a>
+				</div>
+			</div>
+		</div>
+	}
+}

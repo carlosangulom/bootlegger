@@ -1,6 +1,10 @@
 package ui
 
-import "time"
+import (
+	"time"
+
+	"bootlegger/internal/session"
+)
 
 // TickMsg is sent periodically to update animations and progress
 type TickMsg time.Time
@@ -124,4 +128,12 @@ type LEDBlinkMsg struct{}
 // TabSwitchMsg switches the active tab in the log panel
 type TabSwitchMsg struct {
 	Tab LogPanelTab
+}
+
+// NewSessionMsg signals the user wants to start a new session from the session manager.
+type NewSessionMsg struct{}
+
+// SessionsLoadedMsg carries the list of sessions scanned from disk.
+type SessionsLoadedMsg struct {
+	Records []session.SessionRecord
 }

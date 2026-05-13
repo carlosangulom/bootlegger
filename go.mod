@@ -3,9 +3,11 @@ module bootlegger
 go 1.25.4
 
 require (
+	github.com/a-h/templ v0.3.1001
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/gorilla/mux v1.8.1
 )
 
 require (
